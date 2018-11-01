@@ -9,6 +9,7 @@ import (
 	"github.com/platinasystems/vnet"
 
 	"fmt"
+	"runtime"
 )
 
 // Dense index into fib vector.
@@ -78,11 +79,11 @@ func (f *fibMain) FibNameForIndex(i FibIndex) string {
 	}
 }
 
-func (n FibName) String() string {
-	f := &n.M.fibMain
-	if f == nil {
-		return fmt.Sprintf("%d", n.I)
+/* helper routine to print the stack trace in a method */
+func PrintRuntimeStack(marker string, print bool) {
+	if print {
+		trace := make([]byte, 1024) //increase size for higher stack depth
+		count := runtime.Stack(trace, true)
+		fmt.Printf("**%s returning %d bytes: %s \n", marker, count, trace)
 	}
-	return f.FibNameForIndex(n.I)
-
 }

@@ -35,6 +35,7 @@ func ipAddressStringer(a *ip.Address) string { return IpAddress(a).String() }
 type Main struct {
 	vnet.Package
 	ip.Main
+	fibMain
 	nodeMain
 }
 
