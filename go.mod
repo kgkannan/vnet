@@ -12,3 +12,5 @@ require (
 	github.com/platinasystems/xeth v1.2.0
 	gopkg.in/yaml.v2 v2.2.1
 )
+
+replace github.com/platinasystems/elib => ../elib

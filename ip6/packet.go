@@ -8,6 +8,7 @@ import (
 	"github.com/platinasystems/vnet"
 	"github.com/platinasystems/vnet/ip"
 
+	"bytes"
 	"unsafe"
 )
 
@@ -70,4 +71,11 @@ func (h *Header) Finalize(hs []vnet.PacketHeader) {
 		sum += h.Len()
 	}
 	h.Payload_length = uint16(sum)
+}
+
+// Compare 2 addresses for sorting.
+//TBDIP6: PRG: can bytes.Compare() be used
+func (a *Address) Diff(b *Address) (v int) {
+	v = bytes.Compare(a[:], b[:])
+	return
 }

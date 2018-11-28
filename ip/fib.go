@@ -82,7 +82,7 @@ func (f *fibMain) FibNameForIndex(i FibIndex) string {
 /* helper routine to print the stack trace in a method */
 func PrintRuntimeStack(marker string, print bool) {
 	if print {
-		trace := make([]byte, 1024) //increase size for higher stack depth
+		trace := make([]byte, 4096) //increase size for higher stack depth
 		count := runtime.Stack(trace, true)
 		fmt.Printf("**%s returning %d bytes: %s \n", marker, count, trace)
 	}

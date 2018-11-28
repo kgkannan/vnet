@@ -37,6 +37,7 @@ type Main struct {
 	ip.Main
 	fibMain
 	nodeMain
+	ifAddrAddDelHooks IfAddrAddDelHookVec
 }
 
 func RegisterLayer(v *vnet.Vnet, t ip.Protocol, l vnet.Layer) {

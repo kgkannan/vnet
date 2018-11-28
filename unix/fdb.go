@@ -26,6 +26,7 @@ import (
 	"github.com/platinasystems/vnet/internal/dbgvnet"
 	"github.com/platinasystems/vnet/ip"
 	"github.com/platinasystems/vnet/ip4"
+	"github.com/platinasystems/vnet/ip6"
 	"github.com/platinasystems/vnet/unix/internal/dbgfdb"
 	"github.com/platinasystems/xeth"
 )
@@ -134,6 +135,10 @@ func initVnetFromXeth(v *vnet.Vnet) {
 	// Initiate walk of PortEntry map to send IFAs
 	ProcessInterfaceAddr(nil, vnet.ReadyVnetd, v)
 
+	/* TBDIP6 */
+	// Initiate walk of PortEntry map to send IFAs
+	//ProcessInterfaceIp6Addr(nil, vnet.ReadyVnetd, v)
+
 	// Initiate walk of PortEntry map to send vnetd ethtool data
 	InitInterfaceEthtool(v)
 
@@ -193,10 +198,25 @@ func (e *fdbEvent) EventAction() {
 		e.currMsg = currMsgType{id: i, kind: kind}
 		e.Unlock()
 		switch xeth.KindOf(msg) {
+		/*
+		 * TBDIP6:
+		 * case xeth.XETH_MSG_KIND_NEIGH_UPDATE:
+		 *	err = ProcessIp6Neighbor((*xeth.MsgNeighUpdate)(ptr), e.evType, vn)
+		 */
 		case xeth.XETH_MSG_KIND_NEIGH_UPDATE:
 			err = ProcessIpNeighbor((*xeth.MsgNeighUpdate)(ptr), vn)
+		/*
+		 * TBDIP6:
+		 * case xeth.XETH_MSG_KIND_FIBENTRY:
+		 *	err = ProcessIp6FibEntry((*xeth.MsgFibEntry)(ptr), e.evType, vn)
+		 */
 		case xeth.XETH_MSG_KIND_FIBENTRY:
 			err = ProcessFibEntry((*xeth.MsgFibentry)(ptr), vn)
+		/*
+		 * TBDIP6:
+		 * case xeth.XETH_MSG_KIND_IFA:
+		 *	err = ProcessInterfaceIp6Addr((*xeth.MsgIfa)(ptr), e.evType, vn)
+		 */
 		case xeth.XETH_MSG_KIND_IFA:
 			err = ProcessInterfaceAddr((*xeth.MsgIfa)(ptr), e.evType, vn)
 		case xeth.XETH_MSG_KIND_IFINFO:
@@ -310,7 +330,26 @@ func (ns *net_namespace) parseIP4NextHops(msg *xeth.MsgFibentry) (nhs ip.NextHop
 	return
 }
 
+func ipnetToIPPrefixHelper(ipnet *net.IPNet) (p ip.Prefix) {
+	for i := range ipnet.IP {
+		p.Address[i] = ipnet.IP[i]
+	}
+	maskOnes, _ := ipnet.Mask.Size()
+	p.Len = uint32(maskOnes)
+	return
+}
+
+func ipnetToIP6Prefix(ipnet *net.IPNet) (p ip6.Prefix) {
+	for i := range ipnet.IP {
+		p.Address[i] = ipnet.IP[i]
+	}
+	maskOnes, _ := ipnet.Mask.Size()
+	p.Len = uint32(maskOnes)
+	return
+}
+
 func (ns *net_namespace) parseIP4NextHops_old(msg *xeth.MsgFibentry) (nhs []ip4_next_hop) {
+
 	if ns.ip4_next_hops != nil {
 		ns.ip4_next_hops = ns.ip4_next_hops[:0]
 	}
@@ -359,6 +398,169 @@ func (ns *net_namespace) parseIP4NextHops_old(msg *xeth.MsgFibentry) (nhs []ip4_
 		}
 	}
 	ns.ip4_next_hops = nhs // save for next call
+	return
+}
+
+//TBDIP6: PRG
+//v1 without method;
+//options: avoid duplicate/parallel path for ipv6 and ipv4
+func ProcessSingleIpNexthop(ns *net_namespace, xeth_nh xeth.NextHop, ip_nh ip_next_hop) (err error) {
+	intf := ns.interface_by_index[uint32(xeth_nh.Ifindex)]
+	if intf == nil {
+		dbgfdb.Fib.Log("no ns-intf for ifindex",
+			xeth_nh.Ifindex)
+		return
+	}
+
+	if ip_nh.is_ip4 {
+		nhs := ip_nh.ip4_nhs
+		//call a methods that returns an interface?
+		nh := ip4_next_hop{}
+		nh.intf = intf
+		nh.Weight = ip.NextHopWeight(1)
+		if xeth_nh.Weight != 0 {
+			nh.Weight = ip.NextHopWeight(xeth_nh.Weight)
+		}
+		nh.Si = intf.si
+		copy(nh.Address[:], xeth_nh.IP())
+		nhs = append(nhs, nh)
+	} else {
+		nhs := ip_nh.ip6_nhs
+		nh := ip6_next_hop{}
+		nh.intf = intf
+		nh.Weight = ip.NextHopWeight(1)
+		if xeth_nh.Weight != 0 {
+			nh.Weight = ip.NextHopWeight(xeth_nh.Weight)
+		}
+		nh.Si = intf.si
+		copy(nh.Address[:], xeth_nh.IP())
+		nhs = append(nhs, nh)
+	}
+
+	return nil
+}
+
+//TBDIP6: PRG
+func ProcessMultipleIpNexthops(ns *net_namespace, xethNhs []xeth.NextHop, ip_nh ip_next_hop) {
+	for _, xnh := range xethNhs {
+		ret := ProcessSingleIpNexthop(ns, xnh, ip_nh) //.Ifindex, ip.NextHopWeight(xnh.Weight), xnh.IP())
+		if ret != nil {
+			//log message
+		}
+		/*
+			intf := ns.interface_by_index[uint32(xnh.Ifindex)]
+			if intf == nil {
+				dbgfdb.Fib.Log("no ns-intf for ifindex",
+					xnh.Ifindex)
+				continue
+			}
+			nh.Si = intf.si
+			nh.Weight = ip.NextHopWeight(xnh.Weight)
+			if nh.Weight == 0 {
+				nh.Weight = 1
+			}
+			copy(nh.Address[:], xnh.IP())
+			nhs = append(nhs, nh)
+		*/
+	}
+
+}
+
+//TBDIP6: PRG
+//common helper method to parse ip4 or ip6 nhs; set ip_next_hop.is_ipv4 for ipv4
+func (ns *net_namespace) parseIPNextHopsHelper(msg *xeth.MsgFibentry, family uint8) (ip_nh ip_next_hop) {
+	if family != syscall.AF_INET {
+		if ns.ip4_next_hops != nil {
+			ns.ip4_next_hops = ns.ip4_next_hops[:0]
+		}
+		ip_nh.ip4_nhs = ns.ip4_next_hops
+		ip_nh.is_ip4 = true
+	} else if family == syscall.AF_INET6 {
+		if ns.ip6_next_hops != nil {
+			ns.ip6_next_hops = ns.ip6_next_hops[:0]
+		}
+		ip_nh.ip6_nhs = ns.ip6_next_hops
+		ip_nh.is_ip4 = false
+	}
+
+	if ns == nil {
+		dbgfdb.Fib.Log("ns is nil")
+	} else {
+		dbgfdb.Fib.Log("ns is", ns.name)
+	}
+	xethNhs := msg.NextHops()
+	dbgfdb.Fib.Log(len(xethNhs), "nexthops")
+	for i, _ := range xethNhs {
+		dbgfdb.Fib.Logf("nexthops[%d]: %#v", i, xethNhs[i])
+	}
+
+	if len(xethNhs) == 1 {
+		ret := ProcessSingleIpNexthop(ns, xethNhs[0], ip_nh)
+		if ret != nil {
+			//err log or panic
+		}
+	} else {
+		ProcessMultipleIpNexthops(ns, xethNhs, ip_nh)
+	}
+
+	if family == syscall.AF_INET {
+		ns.ip4_next_hops = ip_nh.ip4_nhs // save for next call
+	} else if family == syscall.AF_INET6 {
+		ns.ip6_next_hops = ip_nh.ip6_nhs // save for next call
+	}
+	return
+}
+
+//TBDIP6: PRG
+func (ns *net_namespace) parseIP6NextHops(msg *xeth.MsgFibentry) (nhs []ip6_next_hop) {
+	if ns.ip6_next_hops != nil {
+		ns.ip6_next_hops = ns.ip6_next_hops[:0]
+	}
+	nhs = ns.ip6_next_hops
+
+	if ns == nil {
+		dbgfdb.Fib.Log("ns is nil")
+	} else {
+		dbgfdb.Fib.Log("ns is", ns.name)
+	}
+	xethNhs := msg.NextHops()
+	dbgfdb.Fib.Log(len(xethNhs), "nexthops")
+	for i, _ := range xethNhs {
+		dbgfdb.Fib.Logf("nexthops[%d]: %#v", i, xethNhs[i])
+	}
+
+	// If only 1 nh then assume this is single OIF nexthop
+	// otherwise it's multipath
+	nh := ip6_next_hop{}
+	nh.Weight = 1
+	if len(xethNhs) == 1 {
+		nh.intf = ns.interface_by_index[uint32(xethNhs[0].Ifindex)]
+		if nh.intf == nil {
+			dbgfdb.Fib.Log("no ns-intf for ifindex",
+				xethNhs[0].Ifindex)
+			return
+		}
+		nh.Si = nh.intf.si
+		copy(nh.Address[:], xethNhs[0].IP())
+		nhs = append(nhs, nh)
+	} else {
+		for _, xnh := range xethNhs {
+			intf := ns.interface_by_index[uint32(xnh.Ifindex)]
+			if intf == nil {
+				dbgfdb.Fib.Log("no ns-intf for ifindex",
+					xnh.Ifindex)
+				continue
+			}
+			nh.Si = intf.si
+			nh.Weight = ip.NextHopWeight(xnh.Weight)
+			if nh.Weight == 0 {
+				nh.Weight = 1
+			}
+			copy(nh.Address[:], xnh.IP())
+			nhs = append(nhs, nh)
+		}
+	}
+	ns.ip6_next_hops = nhs // save for next call
 	return
 }
 
@@ -423,6 +625,51 @@ func ProcessIpNeighbor(msg *xeth.MsgNeighUpdate, v *vnet.Vnet) (err error) {
 	em := ethernet.GetMain(v)
 	dbgfdb.Neigh.Log(vnet.IsDel(isDel).String(), "nbr", nbr)
 	_, err = em.AddDelIpNeighbor(&m4.Main, &nbr, isDel)
+
+	// Ignore delete of unknown neighbor.
+	if err == ethernet.ErrDelUnknownNeighbor {
+		err = nil
+	}
+	return
+}
+
+func ProcessIp6Neighbor(msg *xeth.MsgNeighUpdate, v *vnet.Vnet) (err error) {
+	// For now only doing IPv6
+	if msg.Family != syscall.AF_INET6 {
+		return
+	}
+
+	kind := xeth.Kind(msg.Kind)
+	dbgfdb.Neigh.Log(kind)
+	var macIsZero bool = true
+	for _, i := range msg.Lladdr {
+		if i != 0 {
+			macIsZero = false
+			break
+		}
+	}
+	isDel := macIsZero
+	m := GetMain(v)
+	ns := getNsByInode(m, msg.Net)
+	netns := xeth.Netns(msg.Net)
+	if ns == nil {
+		dbgfdb.Ns.Log("namespace", netns, "not found")
+		return
+	}
+	si, ok := ns.siForIfIndex(uint32(msg.Ifindex))
+	if !ok {
+		dbgfdb.Neigh.Log("no si for", msg.Ifindex, "in", ns.name)
+		return
+	}
+	nbr := ethernet.IpNeighbor{
+		Si:       si,
+		Ethernet: ethernet.Address(msg.Lladdr),
+		Ip:       ip.Address(msg.Dst),
+	}
+	m6 := ip6.GetMain(v)
+	em := ethernet.GetMain(v)
+	dbgfdb.Neigh.Log(addDel(isDel), "nbr", nbr)
+	_, err = em.AddDelIpNeighbor(&m6.Main, &nbr, isDel)
 
 	// Ignore delete of unknown neighbor.
 	if err == ethernet.ErrDelUnknownNeighbor {
@@ -496,7 +743,63 @@ func ProcessZeroGw(msg *xeth.MsgFibentry, v *vnet.Vnet, ns *net_namespace, isDel
 	return
 }
 
-func addrIsZero(addr net.IP) bool {
+func ProcessIp6ZeroGw(msg *xeth.MsgFibentry, v *vnet.Vnet, ns *net_namespace, isDel, isLocal, isMainUc bool) (err error) {
+	xethNhs := msg.NextHops()
+	pe := vnet.GetPortByIndex(xethNhs[0].Ifindex)
+	if pe != nil {
+		// Adds (local comes first followed by main-uc):
+		// If local-local route then stash /32 prefix into Port[] table
+		// If main-unicast route then lookup port in Port[] table and marry
+		// local prefix and main-unicast prefix-len to install interface-address
+		// Dels (main-uc comes first followed by local):
+		//
+		if FdbIfAddrOn {
+			return
+		}
+		m := GetMain(v)
+		ns := getNsByInode(m, pe.Net)
+		if ns == nil {
+			dbgfdb.Ns.Log("namespace", pe.Net, "not found")
+			return
+		}
+		dbgfdb.Ns.Log("namespace", pe.Net, "found")
+		if isLocal {
+			dbgfdb.Fib.Log(addDel(isDel), "local", msg.Prefix())
+		} else if isMainUc {
+			dbgfdb.Fib.Log(addDel(isDel), "main", msg.Prefix())
+			//m4 := ip4.GetMain(v)
+			//ns.Ip4IfaddrMsg(m4, msg.Prefix(), uint32(xethNhs[0].Ifindex), isDel)
+		} else {
+			dbgfdb.Fib.Log(addDel(isDel),
+				"neither local nor main", msg.Prefix())
+		}
+	} else {
+		// dummy processing
+		if isLocal {
+			dbgfdb.Fib.Log("dummy install punt for", msg.Prefix())
+			m6 := ip6.GetMain(v)
+			in := msg.Prefix()
+			var addr ip6.Address
+			for i := range in.IP {
+				addr[i] = in.IP[i]
+			}
+			//TBDIP6: whats the ip6 equivalent of 127.0.0.0?
+			//seems like ::1/128
+			// Filter 127.*.*.* routes
+			if addr[0] == 0 && addr[len(addr)-1] == 1 {
+				return
+			}
+
+			p := ip6.Prefix{Address: addr, Len: 128}
+			q := p.ToIpPrefix()
+			m6.AddDelRoute(&q, ns.fibIndexForNamespace(), ip.AdjPunt, isDel)
+		}
+	}
+	return
+}
+
+//func addrIsZero(addr net.IP) bool {
+func addrIsZero(addr ip4.Address) bool {
 	var aiz bool = true
 	for _, i := range addr {
 		if i != 0 {
@@ -505,6 +808,248 @@ func addrIsZero(addr net.IP) bool {
 		}
 	}
 	return aiz
+}
+
+func addrIsZeroHelper(addr ip.Address) bool {
+	var aiz bool = true
+	for _, i := range addr {
+		if i != 0 {
+			aiz = false
+			break
+		}
+	}
+	return aiz
+}
+
+func ip6addrIsZero(addr ip6.Address) bool {
+	var aiz bool = true
+	for _, i := range addr {
+		if i != 0 {
+			aiz = false
+			break
+		}
+	}
+	return aiz
+}
+
+/* TBDIP6: helper method to perform common functionality of ip4/ip6
+ */
+func ProcessZeroGwHelper(msg *xeth.MsgFibentry, v *vnet.Vnet, ns *net_namespace, is_ip4, isDel, isLocal, isMainUc bool) (err error) {
+	xethNhs := msg.NextHops()
+	pe := vnet.GetPortByIndex(xethNhs[0].Ifindex)
+	if pe != nil {
+		// Adds (local comes first followed by main-uc):
+		// If local-local route then stash /32 prefix into Port[] table
+		// If main-unicast route then lookup port in Port[] table and marry
+		// local prefix and main-unicast prefix-len to install interface-address
+		// Dels (main-uc comes first followed by local):
+		//
+		if FdbIfAddrOn {
+			return
+		}
+		m := GetMain(v)
+		ns := getNsByInode(m, pe.Net)
+		if ns == nil {
+			dbgfdb.Ns.Log("namespace", pe.Net, "not found")
+			return
+		}
+		dbgfdb.Ns.Log("namespace", pe.Net, "found")
+		if isLocal {
+			dbgfdb.Fib.Log(addDel(isDel), "local", msg.Prefix())
+		} else if isMainUc {
+			dbgfdb.Fib.Log(addDel(isDel), "main", msg.Prefix())
+			//m4 := ip4.GetMain(v)
+			//ns.Ip4IfaddrMsg(m4, msg.Prefix(), uint32(xethNhs[0].Ifindex), isDel)
+		} else {
+			dbgfdb.Fib.Log(addDel(isDel),
+				"neither local nor main", msg.Prefix())
+		}
+	} else {
+		// dummy processing
+		if isLocal {
+			dbgfdb.Fib.Log("dummy install punt for", msg.Prefix())
+			in := msg.Prefix()
+			var addr ip.Address
+			for i := range in.IP {
+				addr[i] = in.IP[i]
+			}
+			//TBDIP6: whats the ip6 equivalent of 127.0.0.0?
+			//seems like ::1/128
+			// Filter 127.*.*.* routes
+			if is_ip4 {
+				if addr[0] == 127 {
+					return
+				}
+				var p ip4.Prefix
+				copy(p.Address[:], addr[:len(p.Address)])
+				p.Len = 32
+				q := p.ToIpPrefix()
+				m4 := ip4.GetMain(v)
+				m4.AddDelRoute(&q, ns.fibIndexForNamespace(), ip.AdjPunt, isDel)
+			} else {
+				if addr[0] == 0 && addr[len(addr)-1] == 1 {
+					return
+				}
+				var p ip6.Prefix
+				copy(p.Address[:], addr[:len(p.Address)])
+				p.Len = 128
+				q := p.ToIpPrefix()
+				m6 := ip6.GetMain(v)
+				m6.AddDelRoute(&q, ns.fibIndexForNamespace(), ip.AdjPunt, isDel)
+			}
+		}
+	}
+	return
+}
+
+/* TBDIP6: PRG */
+/*
+func ProcessMultipleRouteNextHops(p *ip.Prefix, ip_nh ip_next_hops, family uint8, isDel, isReplace bool) {
+	// TBDIP6:
+	// options to iterate once for either ip4/ip6 nhs to avoid repeating code paths for ip4 and ip6
+	// 1. create temp copy of nhs
+	// 2. some how use interface{} to get a generic pointer
+	// 3. define a generic type ip_cmn_next_hop that has all the fields of ip4_nh and ip6_nh and use family to copy
+	// certain fields only into the new nh and pass it to other methods
+	// 4. use reflection package?
+	// 5. refer: AddDelIpNeighbor => use the main package to refer to family specific wrapper
+
+
+	if family == syscall.AF_INET {
+		ptr := unsafe.Pointer(&ip_nh.ip4_nhs[0])
+	} else if family == syscall.AF_INET6 {
+		ptr := unsafe.Pointer(&ip_nh.ip6_nhs[0])
+	}
+	for _, nh := range nhs {
+		if addrIsZeroHelper(nh.Address) {
+			// TBDIP6: call helper
+			ProcessZeroGwHelper(fib_msg, v, nil, ip_nh.is_ip4, isDel, isLocal, isMainUc)
+			return
+		}
+
+		dbgfdb.Fib.Log(addDelReplace(isDel, isReplace), "nexthop", nh.Address,
+			"for", fib_msg.Prefix, "in", netns)
+		if ip_nh.is_ip4 {
+			m4 := ip4.GetMain(v)
+			err = m4.AddDelRouteNextHop(&p, &nh.NextHop, isDel, isReplace)
+		} else {
+			m6 := ip6.GetMain(v)
+			err = m6.AddDelRouteNextHop(&p, &nh.NextHop, isDel, isReplace)
+		}
+		if err != nil {
+			dbgfdb.Fib.Log(err)
+			return
+		}
+		//This flag should only be set once on first nh because it deletes any previously set nh
+		isReplace = false
+	}
+}
+*/
+
+/* TBDIP6: helper method to perform common functionality of ip4/ip6
+ * assumptions:
+ * 1. caller passes msg of type ptr := unsafe.Pointer(&msg[0])
+ * 2. ip6 fib entry message update is different from ip4 fib enty message
+ */
+func ProcessFibEntryHelper(msg []byte, family uint8, v *vnet.Vnet) (err error) {
+	var ip_addr ip.Address
+
+	ptr := unsafe.Pointer(&msg[0])
+	fib_msg := (*xeth.MsgFibentry)(ptr)
+
+	var isLocal bool = fib_msg.Id == xeth.RT_TABLE_LOCAL && fib_msg.Type == xeth.RTN_LOCAL
+	var isMainUc bool = fib_msg.Id == xeth.RT_TABLE_MAIN && fib_msg.Type == xeth.RTN_UNICAST
+
+	netns := xeth.Netns(fib_msg.Net)
+	rtn := xeth.Rtn(fib_msg.Id)
+	rtt := xeth.RtTable(fib_msg.Type)
+
+	// fwiw netlink handling also filters RTPROT_KERNEL and RTPROT_REDIRECT
+	if fib_msg.Type != xeth.RTN_UNICAST || fib_msg.Id != xeth.RT_TABLE_MAIN {
+		if isLocal {
+			dbgfdb.Fib.Log(rtn, "table", rtt, fib_msg.Prefix(),
+				"in", netns)
+		} else {
+			dbgfdb.Fib.Log(nil, "ignore", rtn, "table", rtt,
+				"in", netns)
+			return
+		}
+	} else {
+		dbgfdb.Fib.Log(rtn, "table", rtt, fib_msg.Prefix(), "in", netns)
+	}
+
+	isDel := fib_msg.Event == xeth.FIB_EVENT_ENTRY_DEL
+	isReplace := fib_msg.Event == xeth.FIB_EVENT_ENTRY_REPLACE
+
+	m := GetMain(v)
+	ns := getNsByInode(m, fib_msg.Net)
+	if ns == nil {
+		dbgfdb.Ns.Log("namespace", netns, "not found")
+		return
+	}
+
+	ip_nh := ns.parseIPNextHopsHelper(fib_msg, family)
+
+	//common code for nhs
+	/* single nh => absorbed in multiple nh case in for loop */
+	/*
+		if len(xethNhs) == 1 {
+			var nhAddr ip.Address
+			copy(nhAddr[:], xethNhs[0].IP())
+			if addrIsZeroHelper(nhAddr) {
+				// TBDIP6: call helper
+				ProcessZeroGw(msg, v, ns, isDel, isLocal, isMainUc)
+				return
+			}
+		}
+	*/
+
+	/* TBDIP6: duplicate code path for ip4 and ip6 for now  */
+	// fix this after validating with the  xeth + vnet integration
+	if ip_nh.is_ip4 {
+		p := ipnetToIP4Prefix(fib_msg.Prefix())
+		for _, nh := range ip_nh.ip4_nhs {
+			copy(ip_addr[:], nh.Address[:])
+			if addrIsZeroHelper(ip_addr) {
+				// TBDIP6: call helper
+				ProcessZeroGwHelper(fib_msg, v, nil, ip_nh.is_ip4, isDel, isLocal, isMainUc)
+				return
+			}
+
+			dbgfdb.Fib.Log(addDelReplace(isDel, isReplace), "nexthop", nh.Address,
+				"for", fib_msg.Prefix, "in", netns)
+			m4 := ip4.GetMain(v)
+			err = m4.AddDelRouteNextHop(&p, &nh.NextHop, isDel, isReplace)
+			if err != nil {
+				dbgfdb.Fib.Log(err)
+				return
+			}
+			//This flag should only be set once on first nh because it deletes any previously set nh
+			isReplace = false
+		}
+	} else {
+		p := ipnetToIP6Prefix(fib_msg.Prefix())
+		for _, nh := range ip_nh.ip6_nhs {
+			copy(ip_addr[:], nh.Address[:])
+			if addrIsZeroHelper(ip_addr) {
+				// TBDIP6: call helper
+				ProcessZeroGwHelper(fib_msg, v, nil, ip_nh.is_ip4, isDel, isLocal, isMainUc)
+				return
+			}
+
+			dbgfdb.Fib.Log(addDelReplace(isDel, isReplace), "nexthop", nh.Address,
+				"for", fib_msg.Prefix, "in", netns)
+			m6 := ip6.GetMain(v)
+			err = m6.AddDelRouteNextHop(&p, &nh.NextHop, isDel, isReplace)
+			if err != nil {
+				dbgfdb.Fib.Log(err)
+				return
+			}
+			//This flag should only be set once on first nh because it deletes any previously set nh
+			isReplace = false
+		}
+	}
+	return nil
 }
 
 // NB:
@@ -571,11 +1116,104 @@ func ProcessFibEntry(msg *xeth.MsgFibentry, v *vnet.Vnet) (err error) {
 	return
 }
 
-func (ns *net_namespace) Ip4IfaddrMsg(m4 *ip4.Main, p *net.IPNet, ifindex uint32, isDel bool) (err error) {
+//TBDIP6: PRG
+//TBDIP6: PRG
+//-added ip6i equivalents
+func ProcessIp6FibEntry(msg *xeth.MsgFibentry, v *vnet.Vnet) (err error) {
+
+	var isLocal bool = msg.Id == xeth.RT_TABLE_LOCAL && msg.Type == xeth.RTN_LOCAL
+	var isMainUc bool = msg.Id == xeth.RT_TABLE_MAIN && msg.Type == xeth.RTN_UNICAST
+
+	netns := xeth.Netns(msg.Net)
+	rtn := xeth.Rtn(msg.Id)
+	rtt := xeth.RtTable(msg.Type)
+	// fwiw netlink handling also filters RTPROT_KERNEL and RTPROT_REDIRECT
+	if msg.Type != xeth.RTN_UNICAST || msg.Id != xeth.RT_TABLE_MAIN {
+		if isLocal {
+			dbgfdb.Fib.Log(rtn, "table", rtt, msg.Prefix(),
+				"in", netns)
+		} else {
+			dbgfdb.Fib.Log(nil, "ignore", rtn, "table", rtt,
+				"in", netns)
+			return
+		}
+	} else {
+		dbgfdb.Fib.Log(rtn, "table", rtt, msg.Prefix(), "in", netns)
+	}
+
+	isDel := msg.Event == xeth.FIB_EVENT_ENTRY_DEL
+	isReplace := msg.Event == xeth.FIB_EVENT_ENTRY_REPLACE
+
+	p := ipnetToIP6Prefix(msg.Prefix())
+
+	m := GetMain(v)
+	ns := getNsByInode(m, msg.Net)
+	if ns == nil {
+		dbgfdb.Ns.Log("namespace", netns, "not found")
+		return
+	}
+	nhs := ns.parseIP6NextHops(msg)
+	m6 := ip6.GetMain(v)
+
+	dbgfdb.Fib.Log(len(nhs), "nexthops for", netns)
+
+	// Check for dummy processing
+	xethNhs := msg.NextHops()
+	if len(xethNhs) == 1 {
+		var nhAddr ip6.Address
+		copy(nhAddr[:], xethNhs[0].IP())
+
+		if ip6addrIsZero(nhAddr) {
+			//TBDIP6: call ip6 specific method
+			ProcessIp6ZeroGw(msg, v, ns, isDel, isLocal, isMainUc)
+			return
+		}
+
+	}
+
+	// Regular nexthop processing
+	for _, nh := range nhs {
+		if ip6addrIsZero(nh.Address) {
+			//TBDIP6: call ip6 specific method
+			ProcessIp6ZeroGw(msg, v, nil, isDel, isLocal, isMainUc)
+			return
+		}
+
+		dbgfdb.Fib.Log(addDelReplace(isDel, isReplace), "nexthop", nh.Address,
+			"for", msg.Prefix, "in", netns)
+
+		err = m6.AddDelRouteNextHop(&p, &nh.NextHop, isDel, isReplace)
+		if err != nil {
+			dbgfdb.Fib.Log(err)
+			return
+		}
+		//This flag should only be set once on first nh because it deletes any previously set nh
+		isReplace = false
+	}
+	return
+}
+
+func (ns *net_namespace) Ip4IfaddrMsg(m4 *ip4.Main, ipnet *net.IPNet, ifindex uint32, isDel bool) (err error) {
+	p := ipnetToIP4Prefix(ipnet)
+	dbgfdb.Ifa.Log(ipnet, "-->", p)
 	if si, ok := ns.siForIfIndex(ifindex); ok {
 		dbgfdb.Ifa.Log(vnet.IsDel(isDel).String(), "si", si)
 		ns.validateFibIndexForSi(si)
 		err = m4.AddDelInterfaceAddress(si, p, isDel)
+		dbgfdb.Ifa.Log(err)
+	} else {
+		dbgfdb.Ifa.Log("no si for ifindex:", ifindex)
+	}
+	return
+}
+
+func (ns *net_namespace) Ip6IfaddrMsg(m6 *ip6.Main, ipnet *net.IPNet, ifindex uint32, isDel bool) (err error) {
+	p := ipnetToIP6Prefix(ipnet)
+	dbgfdb.Ifa.Log(ipnet, "-->", p)
+	if si, ok := ns.siForIfIndex(ifindex); ok {
+		dbgfdb.Ifa.Log(addDel(isDel), "si", si)
+		ns.validateFibIndexForSi(si)
+		err = m6.AddDelInterfaceAddress(si, &p, isDel)
 		dbgfdb.Ifa.Log(err)
 	} else {
 		dbgfdb.Ifa.Log("no si for ifindex:", ifindex)
@@ -665,7 +1303,95 @@ func makeMsgIfa(xethif *xeth.InterfaceEntry, peipnet *net.IPNet) (buf []byte) {
 	msg.Mask = ipnetToUint(peipnet, false)
 
 	dbgfdb.Ifa.Log(xethif.Name, msg.IPNet())
+
 	return
+}
+
+func ProcessInterfaceIp6Addr(msg *xeth.MsgIfa, action vnet.ActionType, v *vnet.Vnet) (err error) {
+	if !FdbIfAddrOn {
+		return
+	}
+	if msg == nil {
+		sendFdbEventIp6IfAddr(v)
+		return
+	}
+	xethif := xeth.Interface.Indexed(msg.Ifindex)
+	if xethif == nil {
+		err = fmt.Errorf("can't find %d", msg.Ifindex)
+		return
+	}
+	ifname := xethif.Name
+	if len(ifname) == 0 {
+		err = fmt.Errorf("interface %d has no name", msg.Ifindex)
+		return
+	}
+	ifaevent := xeth.IfaEvent(msg.Event)
+	switch action {
+	case vnet.PreVnetd:
+		// stash addresses for later use
+		pe := vnet.SetPort(ifname)
+		dbgfdb.Ifa.Log("PreVnetd", ifaevent, msg.IPNet(), "to", ifname)
+		if msg.IsAdd() {
+			pe.AddIPNet(msg.IPNet())
+		} else if msg.IsDel() {
+			pe.DelIPNet(msg.IPNet())
+		}
+	case vnet.ReadyVnetd:
+		// Walk Port map and flush any IFAs we gathered at prevnetd time
+		dbgfdb.Ifa.Log("ReadyVnetd", ifaevent)
+		sendFdbEventIp6IfAddr(v)
+
+		if false {
+			m := GetMain(v)
+			for _, pe := range vnet.Ports {
+				ns := getNsByInode(m, pe.Net)
+				if ns != nil {
+					dbgfdb.Ifa.Log("ReadyVnetd namespace",
+						pe.Net, pe.Ifname)
+					m6 := ip6.GetMain(v)
+					for _, peipnet := range pe.IPNets {
+						ns.Ip6IfaddrMsg(m6, peipnet, uint32(pe.Ifindex), false)
+					}
+				} else {
+					dbgfdb.Ns.Log("ReadyVnetd namespace",
+						pe.Net, "not found")
+				}
+			}
+		}
+
+	case vnet.PostReadyVnetd:
+		dbgfdb.Ifa.Log("PostReadyVnetd", ifaevent)
+		fallthrough
+	case vnet.Dynamic:
+		dbgfdb.Ifa.Log("Dynamic", ifaevent)
+		// vnetd is up and running and received an event, so call into vnet api
+		pe, found := vnet.Ports[ifname]
+		if !found {
+			err = fmt.Errorf("Dynamic IFA - %q unknown", ifname)
+			dbgfdb.Ifa.Log(err)
+			return
+		}
+		if FdbOn {
+			if action == vnet.Dynamic {
+				dbgfdb.Ifa.Log(ifname, ifaevent, msg.IPNet())
+				if msg.IsAdd() {
+					pe.AddIPNet(msg.IPNet())
+				} else if msg.IsDel() {
+					pe.DelIPNet(msg.IPNet())
+				}
+			}
+
+			m := GetMain(v)
+			ns := getNsByInode(m, pe.Net)
+			if ns != nil {
+				dbgfdb.Ns.Log("namespace", pe.Net, "found")
+				m6 := ip6.GetMain(v)
+				ns.Ip6IfaddrMsg(m6, msg.IPNet(), uint32(pe.Ifindex), msg.IsDel())
+			} else {
+				dbgfdb.Ns.Log("namespace", pe.Net, "not found")
+			}
+		}
+	}
 }
 
 func sendFdbEventIfAddr(v *vnet.Vnet) {
@@ -691,6 +1417,44 @@ func sendFdbEventIfAddr(v *vnet.Vnet) {
 	})
 	dbgfdb.Ifa.Log("sending", fe.NumMsgs, "messages")
 	fe.Signal()
+}
+
+/* TBDIP6: ip6 version */
+func sendFdbEventIp6IfAddr(v *vnet.Vnet) {
+	/*
+		m := GetMain(v)
+		fdbm := &m.FdbMain
+		fe := fdbm.GetEvent(vnet.PostReadyVnetd)
+
+		for _, pe := range vnet.Ports {
+			xethif := xeth.Interface.Indexed(pe.Ifindex)
+			ifname := xethif.Name
+			dbgfdb.Ifa.Log(ifname)
+
+			for _, peipnet := range pe.IPNets {
+				buf := xeth.Pool.Get(xeth.SizeofMsgIfa)
+				msg := (*xeth.MsgIfa)(unsafe.Pointer(&buf[0]))
+				msg.Kind = xeth.XETH_MSG_KIND_IFA
+				msg.Ifindex = xethif.Index
+				msg.Event = xeth.IFA_ADD
+				msg.Address = ipnetToUint(peipnet, true)
+				msg.Mask = ipnetToUint(peipnet, false)
+				dbgfdb.Ifa.Log(ifname, msg.IPNet())
+				ok := fe.EnqueueMsg(buf)
+				if !ok {
+					// filled event with messages so send event and start a new one
+					fe.Signal()
+					fe = fdbm.GetEvent(vnet.PostReadyVnetd)
+					ok := fe.EnqueueMsg(buf)
+					if !ok {
+						panic("sendFdbEventIfAddr: Re-enqueue of msg failed")
+					}
+				}
+			}
+		}
+		dbgfdb.Ifa.Log("sending", fe.NumMsgs, "messages")
+		fe.Signal()
+	*/
 }
 
 func pleaseDoAddNamepace(v *vnet.Vnet, net uint64) {
