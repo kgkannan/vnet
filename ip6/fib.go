@@ -1202,10 +1202,11 @@ func (f *Fib) replaceNextHop(m *Main, p *Prefix, pf *Fib, fromNextHopAdj, toNext
 			}
 		} else {
 			// Adjacencies in the toNextHopAj must be rewrites for ReplaceNextHop
-			if err = m.ReplaceNextHop(adj, fromNextHopAdj, toNextHopAdj, r); err != nil {
+			var newAdj ip.Adj
+			if newAdj, err = m.ReplaceNextHop(adj, fromNextHopAdj, toNextHopAdj, r); err != nil {
 				err = fmt.Errorf("replace next hop %v from-nha %v to-nha %v: %v", adj, fromNextHopAdj, toNextHopAdj, err)
 			} else {
-				m.callFibAddDelHooks(pf.index, p, adj, isDel)
+				m.callFibAddDelHooks(pf.index, p, newAdj, isDel)
 			}
 		}
 	}
