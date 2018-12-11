@@ -668,7 +668,7 @@ func ProcessIp6Neighbor(msg *xeth.MsgNeighUpdate, v *vnet.Vnet) (err error) {
 	}
 	m6 := ip6.GetMain(v)
 	em := ethernet.GetMain(v)
-	dbgfdb.Neigh.Log(addDel(isDel), "nbr", nbr)
+	dbgfdb.Neigh.Log(vnet.IsDel(isDel), "nbr", nbr)
 	_, err = em.AddDelIpNeighbor(&m6.Main, &nbr, isDel)
 
 	// Ignore delete of unknown neighbor.
@@ -753,9 +753,6 @@ func ProcessIp6ZeroGw(msg *xeth.MsgFibentry, v *vnet.Vnet, ns *net_namespace, is
 		// local prefix and main-unicast prefix-len to install interface-address
 		// Dels (main-uc comes first followed by local):
 		//
-		if FdbIfAddrOn {
-			return
-		}
 		m := GetMain(v)
 		ns := getNsByInode(m, pe.Net)
 		if ns == nil {
@@ -764,13 +761,13 @@ func ProcessIp6ZeroGw(msg *xeth.MsgFibentry, v *vnet.Vnet, ns *net_namespace, is
 		}
 		dbgfdb.Ns.Log("namespace", pe.Net, "found")
 		if isLocal {
-			dbgfdb.Fib.Log(addDel(isDel), "local", msg.Prefix())
+			dbgfdb.Fib.Log(vnet.IsDel(isDel).String(), "local", msg.Prefix())
 		} else if isMainUc {
-			dbgfdb.Fib.Log(addDel(isDel), "main", msg.Prefix())
+			dbgfdb.Fib.Log(vnet.IsDel(isDel).String(), "main", msg.Prefix())
 			//m4 := ip4.GetMain(v)
 			//ns.Ip4IfaddrMsg(m4, msg.Prefix(), uint32(xethNhs[0].Ifindex), isDel)
 		} else {
-			dbgfdb.Fib.Log(addDel(isDel),
+			dbgfdb.Fib.Log(vnet.IsDel(isDel),
 				"neither local nor main", msg.Prefix())
 		}
 	} else {
@@ -799,7 +796,7 @@ func ProcessIp6ZeroGw(msg *xeth.MsgFibentry, v *vnet.Vnet, ns *net_namespace, is
 }
 
 //func addrIsZero(addr net.IP) bool {
-func addrIsZero(addr ip4.Address) bool {
+func addrIsZero(addr net.IP) bool {
 	var aiz bool = true
 	for _, i := range addr {
 		if i != 0 {
@@ -844,9 +841,6 @@ func ProcessZeroGwHelper(msg *xeth.MsgFibentry, v *vnet.Vnet, ns *net_namespace,
 		// local prefix and main-unicast prefix-len to install interface-address
 		// Dels (main-uc comes first followed by local):
 		//
-		if FdbIfAddrOn {
-			return
-		}
 		m := GetMain(v)
 		ns := getNsByInode(m, pe.Net)
 		if ns == nil {
@@ -855,13 +849,13 @@ func ProcessZeroGwHelper(msg *xeth.MsgFibentry, v *vnet.Vnet, ns *net_namespace,
 		}
 		dbgfdb.Ns.Log("namespace", pe.Net, "found")
 		if isLocal {
-			dbgfdb.Fib.Log(addDel(isDel), "local", msg.Prefix())
+			dbgfdb.Fib.Log(vnet.IsDel(isDel).String(), "local", msg.Prefix())
 		} else if isMainUc {
-			dbgfdb.Fib.Log(addDel(isDel), "main", msg.Prefix())
+			dbgfdb.Fib.Log(vnet.IsDel(isDel).String(), "main", msg.Prefix())
 			//m4 := ip4.GetMain(v)
 			//ns.Ip4IfaddrMsg(m4, msg.Prefix(), uint32(xethNhs[0].Ifindex), isDel)
 		} else {
-			dbgfdb.Fib.Log(addDel(isDel),
+			dbgfdb.Fib.Log(vnet.IsDel(isDel).String(),
 				"neither local nor main", msg.Prefix())
 		}
 	} else {
@@ -1211,7 +1205,7 @@ func (ns *net_namespace) Ip6IfaddrMsg(m6 *ip6.Main, ipnet *net.IPNet, ifindex ui
 	p := ipnetToIP6Prefix(ipnet)
 	dbgfdb.Ifa.Log(ipnet, "-->", p)
 	if si, ok := ns.siForIfIndex(ifindex); ok {
-		dbgfdb.Ifa.Log(addDel(isDel), "si", si)
+		dbgfdb.Ifa.Log(vnet.IsDel(isDel), "si", si)
 		ns.validateFibIndexForSi(si)
 		err = m6.AddDelInterfaceAddress(si, &p, isDel)
 		dbgfdb.Ifa.Log(err)
@@ -1308,9 +1302,6 @@ func makeMsgIfa(xethif *xeth.InterfaceEntry, peipnet *net.IPNet) (buf []byte) {
 }
 
 func ProcessInterfaceIp6Addr(msg *xeth.MsgIfa, action vnet.ActionType, v *vnet.Vnet) (err error) {
-	if !FdbIfAddrOn {
-		return
-	}
 	if msg == nil {
 		sendFdbEventIp6IfAddr(v)
 		return
