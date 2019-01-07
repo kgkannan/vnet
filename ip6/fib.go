@@ -22,6 +22,7 @@ var masks = compute_masks()
 // Maps for prefixes for /0 through /32; key in network byte order.
 type MapFib [1 + 128]map[Address]mapFibResult
 
+//set to masklen > 129
 //Map for link local ipv6 address per namespace
 var MapIp6Linklocal map[Ip6NetnsKey]int
 
@@ -96,6 +97,17 @@ func (v *Address) MaskedString(r vnet.MaskedStringer) (s string) {
 //DONE:
 func AddressMaskForLen(l uint) Address       { return netMask(l) } //{ return masks[l] }
 func (p *Prefix) MaskAsAddress() (a Address) { return AddressMaskForLen(uint(p.Len)) }
+func LenForAddressMask(mask Address) (l uint) {
+	var j int
+	j = int(len(cached.masks.val.([]Address)) + 1) //set to masklen > 129
+	for j = range cached.masks.val.([]Address) {
+		if cached.masks.val.([]Address)[uint(j)] == mask {
+			break
+		}
+	}
+
+	return uint(j)
+}
 
 type Prefix struct {
 	Address
