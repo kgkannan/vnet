@@ -216,9 +216,24 @@ func ToIp6Prefix(i *ip.Prefix) (p Prefix) {
 	return
 }
 
+func IPNetToIp6Prefix(i *net.IPNet) (p Prefix) {
+	copy(p.Address[:], i.IP[:AddressBytes])
+	size, _ := i.Mask.Size()
+	p.Len = uint32(size)
+	return
+}
+
 func (p *Prefix) ToIpPrefix() (i ip.Prefix) {
 	copy(i.Address[:], p.Address[:])
 	i.Len = p.Len
+	return
+}
+
+func (p *Prefix) Ip6PrefixToIPNet() (net net.IPNet) {
+	copy(net.IP[:AddressBytes], p.Address[:])
+	maskAddr := p.MaskAsAddress()
+	//copy(net.Mask[:AddressBytes], p.MaskAsAddress())
+	copy(net.Mask[:AddressBytes], maskAddr[:])
 	return
 }
 
@@ -1290,7 +1305,7 @@ func (m *Main) addDelInterfaceAddressRoutes(ia ip.IfAddr, isDel bool) {
 	sw := m.Vnet.SwIf(si)
 	hw := m.Vnet.SupHwIf(sw)
 	fib := m.fibBySi(si)
-	p := ToIp6Prefix(&ifa.Prefix)
+	p := IPNetToIp6Prefix(&ifa.Prefix)
 
 	// Add interface's prefix as route tied to glean adjacency (arp for Ethernet).
 	// Suppose interface has address 1.1.1.1/8; here we add 1.0.0.0/8 tied to glean adjacency.
@@ -1333,7 +1348,7 @@ func (m *Main) addDelInterfaceAddressRoutes(ia ip.IfAddr, isDel bool) {
 func (m *Main) AddDelInterfaceAddress(si vnet.Si, addr *Prefix, isDel bool) (err error) {
 	if !isDel {
 		err = m.ForeachIfAddress(si, func(ia ip.IfAddr, ifa *ip.IfAddress) (err error) {
-			p := ToIp6Prefix(&ifa.Prefix)
+			p := IPNetToIp6Prefix(&ifa.Prefix)
 			if !p.IsEqual(addr) && (addr.Address.MatchesPrefix(&p) || p.Address.MatchesPrefix(addr)) {
 				err = fmt.Errorf("%s: add %s conflicts with existing address %s", si.Name(m.Vnet), addr, &p)
 			}
@@ -1351,7 +1366,7 @@ func (m *Main) AddDelInterfaceAddress(si vnet.Si, addr *Prefix, isDel bool) (err
 
 	sw := m.Vnet.SwIf(si)
 	isUp := sw.IsAdminUp()
-	pa := addr.ToIpPrefix()
+	pa := addr.Ip6PrefixToIPNet() //addr.ToIpPrefix()
 
 	// If interface is admin up, delete interface routes *before* removing address.
 	if isUp && isDel {

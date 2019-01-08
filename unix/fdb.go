@@ -639,6 +639,7 @@ func ProcessIp6Neighbor(msg *xeth.MsgNeighUpdate, v *vnet.Vnet) (err error) {
 		return
 	}
 
+	addr := msg.CloneIP()
 	kind := xeth.Kind(msg.Kind)
 	dbgfdb.Neigh.Log(kind)
 	var macIsZero bool = true
@@ -664,7 +665,7 @@ func ProcessIp6Neighbor(msg *xeth.MsgNeighUpdate, v *vnet.Vnet) (err error) {
 	nbr := ethernet.IpNeighbor{
 		Si:       si,
 		Ethernet: ethernet.Address(msg.Lladdr),
-		Ip:       ip.Address(msg.Dst),
+		Ip:       addr,
 	}
 	m6 := ip6.GetMain(v)
 	em := ethernet.GetMain(v)
@@ -788,7 +789,7 @@ func ProcessIp6ZeroGw(msg *xeth.MsgFibentry, v *vnet.Vnet, ns *net_namespace, is
 			}
 
 			p := ip6.Prefix{Address: addr, Len: 128}
-			q := p.ToIpPrefix()
+			q := p.Ip6PrefixToIPNet() //p.ToIpPrefix()
 			m6.AddDelRoute(&q, ns.fibIndexForNamespace(), ip.AdjPunt, isDel)
 		}
 	}
@@ -862,34 +863,40 @@ func ProcessZeroGwHelper(msg *xeth.MsgFibentry, v *vnet.Vnet, ns *net_namespace,
 		// dummy processing
 		if isLocal {
 			dbgfdb.Fib.Log("dummy install punt for", msg.Prefix())
-			in := msg.Prefix()
-			var addr ip.Address
-			for i := range in.IP {
-				addr[i] = in.IP[i]
-			}
+			netip := msg.Prefix()
+			/*
+				var addr ip.Address
+				for i := range in.IP {
+					addr[i] = in.IP[i]
+				}
+			*/
 			//TBDIP6: whats the ip6 equivalent of 127.0.0.0?
 			//seems like ::1/128
 			// Filter 127.*.*.* routes
 			if is_ip4 {
-				if addr[0] == 127 {
+				if netip.IP[0] == 127 {
 					return
 				}
-				var p ip4.Prefix
-				copy(p.Address[:], addr[:len(p.Address)])
-				p.Len = 32
-				q := p.ToIpPrefix()
+				/*
+					var p ip4.Prefix
+					copy(p.Address[:], addr[:len(p.Address)])
+					p.Len = 32
+					q := p.Ip6PrefixToIPNet() //p.ToIpPrefix()
+				*/
 				m4 := ip4.GetMain(v)
-				m4.AddDelRoute(&q, ns.fibIndexForNamespace(), ip.AdjPunt, isDel)
+				m4.AddDelRoute(netip, ns.fibIndexForNamespace(), ip.AdjPunt, isDel)
 			} else {
-				if addr[0] == 0 && addr[len(addr)-1] == 1 {
+				if netip.IP[0] == 0 && netip.IP[len(netip.IP)-1] == 1 {
 					return
 				}
-				var p ip6.Prefix
-				copy(p.Address[:], addr[:len(p.Address)])
-				p.Len = 128
-				q := p.ToIpPrefix()
+				/*
+					var p ip6.Prefix
+					copy(p.Address[:], addr[:len(p.Address)])
+					p.Len = 128
+					q := p.Ip6PrefixToIPNet()
+				*/
 				m6 := ip6.GetMain(v)
-				m6.AddDelRoute(&q, ns.fibIndexForNamespace(), ip.AdjPunt, isDel)
+				m6.AddDelRoute(netip, ns.fibIndexForNamespace(), ip.AdjPunt, isDel)
 			}
 		}
 	}
@@ -1001,7 +1008,6 @@ func ProcessFibEntryHelper(msg []byte, family uint8, v *vnet.Vnet) (err error) {
 	/* TBDIP6: duplicate code path for ip4 and ip6 for now  */
 	// fix this after validating with the  xeth + vnet integration
 	if ip_nh.is_ip4 {
-		p := ipnetToIP4Prefix(fib_msg.Prefix())
 		for _, nh := range ip_nh.ip4_nhs {
 			copy(ip_addr[:], nh.Address[:])
 			if addrIsZeroHelper(ip_addr) {
@@ -1013,7 +1019,8 @@ func ProcessFibEntryHelper(msg []byte, family uint8, v *vnet.Vnet) (err error) {
 			dbgfdb.Fib.Log(addDelReplace(isDel, isReplace), "nexthop", nh.Address,
 				"for", fib_msg.Prefix, "in", netns)
 			m4 := ip4.GetMain(v)
-			err = m4.AddDelRouteNextHop(&p, &nh.NextHop, isDel, isReplace)
+			//err = m4.AddDelRouteNextHop(&p, &nh.NextHop, isDel, isReplace)
+			err = m4.AddDelRouteNextHop(fib_msg.Prefix(), &nh.NextHop, isDel, isReplace)
 			if err != nil {
 				dbgfdb.Fib.Log(err)
 				return
@@ -1193,7 +1200,7 @@ func (ns *net_namespace) Ip4IfaddrMsg(m4 *ip4.Main, ipnet *net.IPNet, ifindex ui
 	if si, ok := ns.siForIfIndex(ifindex); ok {
 		dbgfdb.Ifa.Log(vnet.IsDel(isDel).String(), "si", si)
 		ns.validateFibIndexForSi(si)
-		err = m4.AddDelInterfaceAddress(si, p, isDel)
+		err = m4.AddDelInterfaceAddress(si, ipnet, isDel)
 		dbgfdb.Ifa.Log(err)
 	} else {
 		dbgfdb.Ifa.Log("no si for ifindex:", ifindex)
@@ -1383,6 +1390,8 @@ func ProcessInterfaceIp6Addr(msg *xeth.MsgIfa, action vnet.ActionType, v *vnet.V
 			}
 		}
 	}
+
+	return
 }
 
 func sendFdbEventIfAddr(v *vnet.Vnet) {
