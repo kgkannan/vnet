@@ -13,6 +13,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"runtime/debug"
 )
 
 type ipNeighborFamily struct {
@@ -56,12 +57,23 @@ type ipNeighbor struct {
 
 var ErrDelUnknownNeighbor = errors.New("delete unknown neighbor")
 
+func recoverAddDelIpNeighbor() {
+	if r := recover(); r != nil {
+		fmt.Println("recovered from ", r)
+		fmt.Println("stacktrace from panic: \n" + string(debug.Stack()))
+	}
+}
+
+//TBDIP6: handle ip6 esp. link-local cases here
+//option 1: specify both ip6.Main, ip4.Main in AddDelIpNeighbor
+//option 2: get m6 := ip6.GetMain(ipNeighborMain.v)
 func (m *ipNeighborMain) AddDelIpNeighbor(im *ip.Main, n *IpNeighbor, isDel bool) (ai ip.Adj, err error) {
 	var rwSi vnet.Si
 	var isBridge bool
 	var ctag, stag uint16
 	var br *bridgeEntry
 
+	//defer recoverAddDelIpNeighbor()
 	ai = ip.AdjNil
 	nf := &m.ipNeighborFamilies[im.Family]
 
@@ -169,6 +181,8 @@ func (m *ipNeighborMain) AddDelIpNeighbor(im *ip.Main, n *IpNeighbor, isDel bool
 		)
 
 		if is_new_adj {
+			dbgvnet.Adj.Logf("calling registered adjadddel for ip.main %p:%v vnet %p\n", im, im, im.GetVnet())
+			//TBDIP6: need ip4 and ip6 for common vnet adjs
 			im.CallAdjAddHooks(ai)
 		}
 		if _, err = im.AddDelRoute(&prefix, im.FibIndexForSi(rwSi), ai, isDel); err != nil {

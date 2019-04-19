@@ -1049,7 +1049,9 @@ func (a *multipathAdjacency) invalidate()   { a.nAdj = 0 }
 func (a *multipathAdjacency) isValid() bool { return a.nAdj != 0 }
 
 func (m *Main) callAdjAddDelHooks(a Adj, isDel bool) {
+	dbgvnet.Adj.Logf("dbg calling adjhook for ip.Main %p adj %v vnet %p\n", m, a, m.GetVnet())
 	for i := range m.adjAddDelHooks {
+		dbgvnet.Adj.Logf("calling adjhook for ip.Main %p adj %v\n", m, a)
 		m.adjAddDelHookVec.Get(i)(m, a, isDel)
 	}
 }
@@ -1057,6 +1059,7 @@ func (m *Main) CallAdjAddHooks(a Adj) { m.callAdjAddDelHooks(a, false) }
 func (m *Main) CallAdjDelHooks(a Adj) { m.callAdjAddDelHooks(a, true) }
 
 func (m *Main) RegisterAdjAddDelHook(f adjAddDelHook, dep ...*dep.Dep) {
+	dbgvnet.Adj.Logf("register adjadddel for ip.main %p:%v\n", m, m)
 	m.adjAddDelHookVec.Add(f, dep...)
 }
 

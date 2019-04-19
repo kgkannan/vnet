@@ -23,6 +23,7 @@ func Init(v *vnet.Vnet) *ip.Main {
 		AddressStringer: ipAddressStringer,
 		RewriteNode:     &m.rewriteNode,
 		PacketType:      vnet.IP6,
+		AddDelRoute:     m.addDelRoute,
 	}
 	m.Main.PackageInit(v, cf)
 	return &m.Main
