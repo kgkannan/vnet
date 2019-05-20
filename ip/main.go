@@ -7,7 +7,6 @@ package ip
 import (
 	"github.com/platinasystems/vnet"
 
-	"fmt"
 	"net"
 )
 
@@ -50,7 +49,6 @@ func (m *Main) GetLayer(t Protocol) (l vnet.Layer, ok bool) {
 }
 
 func (m *Main) Init(v *vnet.Vnet) {
-	fmt.Printf("calling adjInit for family %v\n", m.FamilyConfig)
 	m.adjacencyInit()
 }
 func (m *Main) PackageInit(v *vnet.Vnet, c FamilyConfig) {

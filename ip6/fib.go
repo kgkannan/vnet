@@ -20,7 +20,7 @@ type ipFib ip.Fib
 
 var masks = compute_masks()
 
-var lluc = net.IPNet{
+var LinklocalUnicast = net.IPNet{
 	IP:   net.IP{0xfe, 0x80, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
 	Mask: net.IPMask{0xff, 0xc0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
 }
@@ -454,25 +454,29 @@ func makeLinklocalKey(p *net.IPNet, fi ip.FibIndex) (k LinklocalNetns) {
 	//llipn.Mask = []byte{0xff, 0xc0}
 	//llipn.IP[0] = p.IP[0] & llipn.Mask[0]
 	//llipn.IP[1] = p.IP[1] & llipn.Mask[1]
-	k.lladdr = lluc.IP.String()
+	k.lladdr = LinklocalUnicast.IP.String()
 	k.fi = fi
 	dbgvnet.Adj.Logf("llkey = %v\n", k)
 	return
 }
 
-func updateLinklocalEntry(k LinklocalNetns, update bool) {
-	e := LinklocalEntry{}
-	if !update {
+func getCreateLinklocalEntry(p *net.IPNet, fi ip.FibIndex) (ent LinklocalEntry, found bool) {
+	ent = LinklocalEntry{}
+	key := makeLinklocalKey(p, fi)
+	if MapLinklocalNetns == nil {
+		MapLinklocalNetns = make(map[LinklocalNetns]LinklocalEntry)
+	}
+	if _, found = MapLinklocalNetns[key]; !found {
 		//e.llipn.Mask = []byte{0xff, 0xc0}
 		//e.llipn.IP[0] = k.IP[0] & llipn.Mask[0]
 		//e.llipn.IP[1] = k.IP[1] & llipn.Mask[1]
-		e.ref = 1
+		ent.ref = 1
 	} else {
-		e = MapLinklocalNetns[k]
-		e.ref++
+		ent.ref++
 	}
-	MapLinklocalNetns[k] = e
-	dbgvnet.Adj.Logf("update %v linklocalMap key %v, entry %v\n", k, e)
+	MapLinklocalNetns[key] = ent
+	dbgvnet.Adj.Logf("linklocalMap found %v key %v, entry %v\n", found, key, ent)
+	return
 }
 
 func deleteLinklocalEntry(k LinklocalNetns) {
@@ -480,6 +484,8 @@ func deleteLinklocalEntry(k LinklocalNetns) {
 	dbgvnet.Adj.Logf("delete %v linklocalMap key %v, entry %v\n", k, e)
 	if found {
 		e.ref--
+		//delete the linklocal map entry, when the last linklocal address
+		//for that namespacei gets deleted
 		if e.ref == 0 {
 			dbgvnet.Adj.Logf("freed %v linklocalMap key %v\n", k)
 			delete(MapLinklocalNetns, k)
@@ -582,10 +588,6 @@ func (m *Main) AddDelInterfaceAddressRoute(p *net.IPNet, si vnet.Si, rt ip.Route
 	}
 
 	if rt == ip.LOCAL {
-		var llkey LinklocalNetns
-		if MapLinklocalNetns == nil {
-			MapLinklocalNetns = make(map[LinklocalNetns]LinklocalEntry)
-		}
 		if !isDel {
 			//TBDIP6: link-local address handling;
 			//per interface link-local address should be
@@ -594,10 +596,9 @@ func (m *Main) AddDelInterfaceAddressRoute(p *net.IPNet, si vnet.Si, rt ip.Route
 			//prefix to be programmed should be fe80/8 per namespace
 			if p.IP.IsLinkLocalUnicast() {
 				fi := m.Main.FibIndexForSi(si)
-				llkey = makeLinklocalKey(p, fi)
-				found := false
-				if _, found = MapLinklocalNetns[llkey]; found {
-					updateLinklocalEntry(llkey, true)
+				llkey := makeLinklocalKey(p, fi)
+				_, found := getCreateLinklocalEntry(p, fi)
+				if found {
 					//TBDIP6: store ref-count for
 					//given netns/fi; ref count helps in
 					//deletion case
@@ -605,12 +606,9 @@ func (m *Main) AddDelInterfaceAddressRoute(p *net.IPNet, si vnet.Si, rt ip.Route
 					//TBDIP6: revisit
 					return
 				}
-				if !found {
-					updateLinklocalEntry(llkey, false)
-				}
 				//TBDIP6: for fib optimization, over-write the link-local addr from the key
 				dbgvnet.Adj.Logf("original prefix %v\n", p)
-				p.IP = lluc.IP
+				p.IP = LinklocalUnicast.IP
 				dbgvnet.Adj.Logf("new prefix %v\n", p)
 			}
 			ai, as := m.NewAdj(1)

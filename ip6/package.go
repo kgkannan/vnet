@@ -26,6 +26,7 @@ func Init(v *vnet.Vnet) *ip.Main {
 		AddDelRoute:     m.addDelRoute,
 	}
 	m.Main.PackageInit(v, cf)
+	ip.PrintRuntimeStack("ip6 Init1 callchain", true)
 	return &m.Main
 }
 
@@ -85,5 +86,6 @@ func (m *Main) Init() (err error) {
 	m.nodeInit(v)
 	RegisterLayer(v, ip.IP6_IN_IP, m)
 	ethernet.RegisterLayer(v, ethernet.TYPE_IP6, m)
+	ip.PrintRuntimeStack("ip6 Init2 callchain", true)
 	return
 }

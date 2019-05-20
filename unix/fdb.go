@@ -1550,6 +1550,14 @@ func getNsByInode(m *Main, netNum uint64) *net_namespace {
 	}
 }
 
+func getNsNameByInode(m *Main, nsName string) *net_namespace {
+	if nsName == "" {
+		return &m.default_namespace
+	} else {
+		return m.namespace_by_name[nsName]
+	}
+}
+
 var eth1, eth2 *net.Interface
 
 func makePortEntry(msg *xeth.MsgIfinfo) (pe *vnet.PortEntry) {
@@ -2092,6 +2100,7 @@ func (m *FdbMain) ipFibRoute(c cli.Commander, w cli.Writer, in *cli.Input) (err 
 		nh_mac      string
 		nh          string
 		intf        string
+		nsName      string
 		plen        uint
 	)
 
@@ -2108,10 +2117,11 @@ func (m *FdbMain) ipFibRoute(c cli.Commander, w cli.Writer, in *cli.Input) (err 
 			//display help
 			fmt.Fprintf(w, "<add|del> prefix<ip> len<plen> via intf nh mac where intf is xeth1,.. nh is next-hop address\n")
 			fmt.Fprintf(w, "<add|del> nh<ip> len<plen> intf mac where intf is xeth1,..\n")
-			fmt.Fprintf(w, "<punt> prefix<ip> len<plen> intf mac where intf is xeth1,..\n")
+			fmt.Fprintf(w, "<punt> prefix<ip> len<plen> ns intf mac where intf=xeth1, ns=netns of egress intf\n")
 			return
 		case in.Parse("prefix %s", &prefix):
 		case in.Parse("len %d", &plen):
+		case in.Parse("ns %s", &nsName):
 		case in.Parse("via"):
 			is_via = true
 		case in.Parse("intf %s", &intf):
@@ -2152,13 +2162,16 @@ func (m *FdbMain) ipFibRoute(c cli.Commander, w cli.Writer, in *cli.Input) (err 
 		}
 	}
 
-	netns := 1
 	v := m.m.v
-	ip6_fib_ent.count = 1
 	mv := GetMain(v)
-	ns := getNsByInode(mv, uint64(netns))
+	nsid := 1
+	ns := getNsByInode(mv, uint64(nsid))
+	if nsName != "" {
+		ns = getNsNameByInode(mv, nsName)
+	}
+	ip6_fib_ent.count = 1
 	if ns == nil {
-		dbgfdb.Ns.Log("namespace", netns, "not found")
+		dbgfdb.Ns.Log("namespace", ns.nsid, "not found")
 		return
 	}
 
