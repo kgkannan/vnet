@@ -29,7 +29,7 @@ type FibName struct {
 type FibId uint32
 
 type fibMain struct {
-	//TBDIP6: added fibs from ip4/fib.go
+	//TODO: common ip4/ip6. add fibs here?
 	fibs FibVec
 	// Table index indexed by software interface.
 	fibIndexBySi FibIndexVec
@@ -87,7 +87,8 @@ func (f *fibMain) FibNameForIndex(i FibIndex) string {
 /* helper routine to print the stack trace in a method */
 func PrintRuntimeStack(marker string, print bool) {
 	if print {
-		trace := make([]byte, 4096) //increase size for higher stack depth
+		//increase size for higher stack depth
+		trace := make([]byte, 4096)
 		count := runtime.Stack(trace, true)
 		fmt.Printf("**%s returning %d bytes: %s \n", marker, count, trace)
 	}

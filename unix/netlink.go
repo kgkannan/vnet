@@ -43,7 +43,6 @@ type netlink_namespace struct {
 	netlink_socket_fds [2]int
 	netlink_socket_pair
 	ip4_next_hops []ip4_next_hop
-	//ip6_next_hops []ip6_next_hop
 }
 
 type netlink_socket_pair struct {
@@ -416,7 +415,7 @@ func (ns *net_namespace) validateFibIndexForSi(si vnet.Si) {
 	fi := ns.fibIndexForNamespace()
 
 	m4.SetFibIndexForSi(si, fi)
-	//TBDIP6
+	//TODOIP6, initialize for ip6.Main.ipMain
 	m6.SetFibIndexForSi(si, fi)
 	return
 }
@@ -649,43 +648,11 @@ func set_ip4_next_hop_address(a netlink.Attr, nh *ip4.NextHop) {
 	}
 }
 
-//TBDIP6: Revisit
-/*
-func set_ip6_next_hop_address(a netlink.Attr, nh *ip6.NextHop) {
-	if a != nil {
-		copy(nh.Address[:], a.(*netlink.Ip6Address)[:])
-	}
-}
-*/
-
 type ip4_next_hop struct {
 	ip4.NextHop
 	intf  *net_namespace_interface
 	attrs []netlink.Attr
 }
-
-//TBDIP6: revisit
-/*
-type ip6_next_hop struct {
-	ip6.NextHop
-	intf  *net_namespace_interface
-	attrs []netlink.Attr
-}
-
-// TBDIP6: PRG
-type ip_next_hop struct {
-	ip6_nhs []ip6_next_hop
-	ip4_nhs []ip4_next_hop
-	is_ip4  bool
-}
-*/
-/* TBDIP6: PRG */
-//TBD: how abt an interface that impelements nh methods for the respective family v4 or v6
-/*
-type ip_next_hopper interface {
-	(ns *net_namespace) parse_next_hops(what_type) (nhs []ip_next_hop)
-}
-*/
 
 func (ns *net_namespace) parse_ip4_next_hops(v *netlink.RouteMessage) (nhs []ip4_next_hop) {
 	if ns.ip4_next_hops != nil {

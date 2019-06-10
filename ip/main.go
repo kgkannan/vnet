@@ -48,14 +48,10 @@ func (m *Main) GetLayer(t Protocol) (l vnet.Layer, ok bool) {
 	return
 }
 
-func (m *Main) Init(v *vnet.Vnet) {
-	m.adjacencyInit()
-}
+func (m *Main) Init(v *vnet.Vnet) { m.adjacencyInit() }
+
 func (m *Main) PackageInit(v *vnet.Vnet, c FamilyConfig) {
 	m.v = v
 	m.FamilyConfig = c
 	m.ifAddressMain.init(m)
 }
-
-//TBDIP6: remove this - only for debugging
-func (m *Main) GetVnet() (v *vnet.Vnet) { return m.v }
