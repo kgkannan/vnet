@@ -69,13 +69,12 @@ type FdbMain struct {
 }
 
 type DummyIp6AddDel struct {
-	is_del  bool
-	is_punt bool
-	is_ip6  bool
-	prefix  net.IPNet
-	count   uint
-	ip6_nhs ip.NextHopVec //[]ip6.NextHop
-	//wait      time.Duration
+	is_del    bool
+	is_punt   bool
+	is_ip6    bool
+	prefix    net.IPNet
+	count     uint
+	ip6_nhs   ip.NextHopVec //[]ip6.NextHop
 	fib_index ip.FibIndex
 	ns        *net_namespace
 }
@@ -1387,8 +1386,6 @@ func (m *FdbMain) ipFibRoute(c cli.Commander, w cli.Writer, in *cli.Input) (err 
 			ip6_fib_ent.is_del = false
 		case in.Parse("del"):
 			ip6_fib_ent.is_del = true
-			fmt.Fprintf(w, "unsupported for now\n")
-			return
 		default:
 			err = cli.ParseError
 			fmt.Printf("cli parser error %v\n", err)
@@ -1442,7 +1439,7 @@ func (m *FdbMain) ipFibRoute(c cli.Commander, w cli.Writer, in *cli.Input) (err 
 	defer recoverIpFibRoute()
 	if ip6_fib_ent.is_punt {
 		dbgvnet.Adj.Logf("ip6: netns %v intf addr %v si %v", nsName, ip_pfx, ip6_fib_ent.ip6_nhs[0].Si)
-		m6.AddDelInterfaceAddressRoute(ip_pfx, ip6_fib_ent.ip6_nhs[0].Si, ip.LOCAL, false)
+		m6.AddDelInterfaceAddressRoute(ip_pfx, ip6_fib_ent.ip6_nhs[0].Si, ip.LOCAL, ip6_fib_ent.is_del)
 		return
 	}
 
@@ -1458,7 +1455,7 @@ func (m *FdbMain) ipFibRoute(c cli.Commander, w cli.Writer, in *cli.Input) (err 
 		}
 		dbgvnet.Adj.Logf("ip6: netns %v neighbor ip %v si %v mac %v", nsName, nbr.Ip, nbr.Si, nbr.Ethernet)
 		//em.AddDelIpNeighbor(&m4.Main, &nbr, false)
-		em.AddDelIpNeighbor(&m6.Main, &nbr, false)
+		em.AddDelIpNeighbor(&m6.Main, &nbr, ip6_fib_ent.is_del)
 		if is_via {
 			dbgvnet.Adj.Logf("dbggk: via route for prefix %v intf %s", prefix, intf)
 			//m4.AddDelRouteNextHops(ns.fibIndexForNamespace(), ip_pfx, ip6_fib_ent.ip6_nhs,

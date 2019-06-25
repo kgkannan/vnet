@@ -6,15 +6,14 @@ package ip4
 
 import (
 	"fmt"
-	"net"
-	"sync"
-
 	"github.com/platinasystems/elib"
 	"github.com/platinasystems/elib/dep"
 	"github.com/platinasystems/elib/parse"
 	"github.com/platinasystems/vnet"
 	"github.com/platinasystems/vnet/internal/dbgvnet"
 	"github.com/platinasystems/vnet/ip"
+	"net"
+	"sync"
 )
 
 type Prefix struct {

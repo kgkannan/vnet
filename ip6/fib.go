@@ -5,12 +5,11 @@
 package ip6
 
 import (
+	"fmt"
 	"github.com/platinasystems/elib/dep"
 	"github.com/platinasystems/vnet"
 	"github.com/platinasystems/vnet/internal/dbgvnet"
 	"github.com/platinasystems/vnet/ip"
-
-	"fmt"
 	"net"
 	"runtime"
 	"sync"
