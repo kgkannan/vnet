@@ -12,6 +12,7 @@ import (
 	"github.com/platinasystems/vnet"
 	"github.com/platinasystems/vnet/internal/dbgvnet"
 	"github.com/platinasystems/vnet/ip"
+	"github.com/platinasystems/vnet/ip6"
 	"net"
 	"sync"
 )
@@ -185,10 +186,8 @@ type FibResult struct {
 }
 type FibResultVec []FibResult
 
-//type MapFib [1 + 32]map[vnet.Uint32]FibResultVec
-
 // string key is the string output of the net.IPNet stringer
-type MapFib [1 + 32]map[string]FibResultVec
+type MapFib [1 + 128]map[string]FibResultVec
 
 func (r *FibResult) String() (s string) {
 	if dbgvnet.Adj == 0 {
@@ -422,7 +421,7 @@ func (m *Main) ForeachUnresolved(fn func(fi ip.FibIndex, p net.IPNet)) {
 }
 
 func (m *MapFib) foreach(fn func(p net.IPNet, r FibResult)) {
-	for l := 32; l >= 0; l-- {
+	for l := 128; l >= 0; l-- {
 		//p.Len = uint32(l)
 		for _, rs := range m[l] {
 			for _, r := range rs {
@@ -474,9 +473,8 @@ func (m *MapFib) uninstallAndDelAdjAll(f *Fib, ma *Main) {
 				r := &m[i][rsi][ri]
 				oldAdj := r.Adj
 				f.delFib(ma, r)
-				if !ma.IsAdjFree(oldAdj) {
-					ma.DelAdj(oldAdj)
-				}
+				//get adj from ip.Main based on prefix instead of im
+				ma.CallAdjAddDelByFamily(&r.Prefix.IP, oldAdj, true)
 			}
 		}
 	}
@@ -998,16 +996,16 @@ type fibMain struct {
 	ifRouteAdjIndexBySi map[vnet.Si]ip.Adj
 }
 
-type FibAddDelHook func(i ip.FibIndex, p *Prefix, r ip.Adj, isDel bool)
+//use the same callback for both ipv4, ipv6 fib programming
+type FibAddDelHook func(i ip.FibIndex, p *net.IPNet, r ip.Adj, isDel bool)
 
 func (m *fibMain) RegisterFibAddDelHook(f FibAddDelHook, dep ...*dep.Dep) {
 	m.fibAddDelHooks.Add(f, dep...)
 }
 
 func (m *fibMain) callFibAddDelHooks(fi ip.FibIndex, p *net.IPNet, r ip.Adj, isDel bool) {
-	q := IPNetToV4Prefix(*p)
 	for i := range m.fibAddDelHooks.hooks {
-		m.fibAddDelHooks.Get(i)(fi, &q, r, isDel)
+		m.fibAddDelHooks.Get(i)(fi, p, r, isDel)
 	}
 }
 
@@ -1090,8 +1088,9 @@ func (m *Main) addDelRoute(p *net.IPNet, fi ip.FibIndex, adj ip.Adj, isDel bool)
 	)
 
 	dbgvnet.Adj.Log(vnet.IsDel(isDel), p, "adj", adj)
-
-	if connected, si := adj.IsConnectedRoute(&m.Main); connected { // arped neighbor
+	//get ip.Main based on prefix instead of im
+	im := m.IpMainByFamily(&p.IP)
+	if connected, si := adj.IsConnectedRoute(im); connected { // arped neighbor
 		oldAdj, r, found = f.GetReachable(p, si)
 		dbgvnet.Adj.Logf("found %v, adj %v->%v",
 			found, oldAdj, adj)
@@ -1167,13 +1166,14 @@ func (m *Main) addDelRoute(p *net.IPNet, fi ip.FibIndex, adj ip.Adj, isDel bool)
 		return
 	}
 
-	if adj.IsGlean(&m.Main) {
+	//get ip.Main based on prefix instead of im
+	if adj.IsGlean(im) {
 		dbgvnet.Adj.Log("DEBUG should not be used for glean adj", adj)
 	}
-	if adj.IsLocal(&m.Main) {
+	if adj.IsLocal(im) {
 		dbgvnet.Adj.Log("DEBUG should not be used for local adj", adj)
 	}
-	if adj.IsViaRoute(&m.Main) {
+	if adj.IsViaRoute(im) {
 		dbgvnet.Adj.Log("DEBUG should not be used for nexthop adj", adj)
 	}
 
@@ -1421,11 +1421,12 @@ func (m *Main) AddDelInterfaceAddressRoute(p *net.IPNet, si vnet.Si, rt RouteTyp
 	if rt == GLEAN {
 		addDelAdj := ip.AdjNil
 		if !isDel {
-			ai, as := m.NewAdj(1)
+			//get adj from ip.Main based on prefix instead of im
+			ai, as := m.NewAdjByFamily(&p.IP, 1)
 			dbgvnet.Adj.Log("set adjacency")
 			m.setInterfaceAdjacency(&as[0], si)
 			dbgvnet.Adj.Logf("call CallAdjAddHooks(%v)", ai)
-			m.CallAdjAddHooks(ai)
+			m.CallAdjAddDelByFamily(&p.IP, ai, isDel)
 			addDelAdj = ai
 			dbgvnet.Adj.Log("call Set")
 			if oldAdj, r, ok = f.glean.Set(m, p, ai, nhs, GLEAN); ok {
@@ -1435,9 +1436,7 @@ func (m *Main) AddDelInterfaceAddressRoute(p *net.IPNet, si vnet.Si, rt RouteTyp
 				if oldAdj != ip.AdjNil {
 					dbgvnet.Adj.Logf("DEBUG previous %v glean %v adj %v exist and replace with new adj %v\n",
 						f.Name, p, oldAdj, ai)
-					if !m.IsAdjFree(oldAdj) {
-						m.DelAdj(oldAdj)
-					}
+					m.CallAdjAddDelByFamily(&p.IP, oldAdj, !isDel)
 				}
 			} else {
 				dbgvnet.Adj.Logf("DEBUG %v set glean %v adj %v failed\n", f.Name, p, ai)
@@ -1458,9 +1457,8 @@ func (m *Main) AddDelInterfaceAddressRoute(p *net.IPNet, si vnet.Si, rt RouteTyp
 			dbgvnet.Adj.Log("call delFib")
 			f.delFib(m, r)
 			if oldAdj, ok = f.glean.Unset(p, r.Nhs); ok {
-				if !m.IsAdjFree(oldAdj) {
-					m.DelAdj(oldAdj)
-				}
+				//free adj from ip.Main based on prefix instead of im
+				m.CallAdjAddDelByFamily(&p.IP, oldAdj, isDel)
 				dbgvnet.Adj.Logf("unset %v glean %v done\n", f.Name, &p)
 			}
 		}
@@ -1468,14 +1466,16 @@ func (m *Main) AddDelInterfaceAddressRoute(p *net.IPNet, si vnet.Si, rt RouteTyp
 
 	if rt == LOCAL {
 		if !isDel {
-			ai, as := m.NewAdj(1)
+			//get adj from ip.Main based on prefix instead of im
+			ai, as := m.NewAdjByFamily(&p.IP, 1)
 			as[0].LookupNextIndex = ip.LookupNextLocal
 			as[0].Si = si
 			if hw != nil {
 				as[0].SetMaxPacketSize(hw)
 			}
 			dbgvnet.Adj.Logf("%v local made new adj %v\n", p, ai)
-			m.CallAdjAddHooks(ai)
+			//get adj from ip.Main based on prefix instead of im
+			m.CallAdjAddDelByFamily(&p.IP, ai, isDel)
 			dbgvnet.Adj.Logf("%v local added adj %v\n", p, ai)
 			if _, r, ok = f.local.Set(m, p, ai, nhs, LOCAL); ok {
 				f.addFib(m, r)
@@ -1491,9 +1491,8 @@ func (m *Main) AddDelInterfaceAddressRoute(p *net.IPNet, si vnet.Si, rt RouteTyp
 			}
 			f.delFib(m, r)
 			if oldAdj, ok = f.local.Unset(p, r.Nhs); ok {
-				if !m.IsAdjFree(oldAdj) {
-					m.DelAdj(oldAdj)
-				}
+				//free adj from ip.Main based on prefix instead of im
+				m.CallAdjAddDelByFamily(&p.IP, oldAdj, isDel)
 				dbgvnet.Adj.Logf("unset %v local %v done\n", f.Name, &p)
 			}
 		}
@@ -1665,4 +1664,47 @@ func (m *Main) FibReset(fi ip.FibIndex) {
 	f.punt.uninstall_all(f, m)
 
 	f.Reset()
+}
+
+/*
+ * adj hooks should be called for the respective prefix type;
+ * since fdb handler for both ipv4/ipv6 uses the same handlers in ip4/fib.go
+ * whose family is intialized to ip4 and ends up calling the hooks using correponding
+ * ip.Main and hence ip4.Main
+ */
+func (m *Main) CallAdjAddDelByFamily(ipn *net.IP, ai ip.Adj, isDel bool) {
+	var im *ip.Main
+	addr_family := ip.GetFamilyByAddress(ipn)
+	if addr_family == ip.Ip4 {
+		m := GetMain(m.v)
+		im = &m.Main
+	} else if addr_family == ip.Ip6 {
+		m := ip6.GetMain(m.v)
+		im = &m.Main
+	}
+	if !isDel {
+		im.CallAdjAddHooks(ai)
+	} else {
+		if !im.IsAdjFree(ai) {
+			im.DelAdj(ai)
+		}
+	}
+}
+
+func (m *Main) IpMainByFamily(ipn *net.IP) (im *ip.Main) {
+	addr_family := ip.GetFamilyByAddress(ipn)
+	if addr_family == ip.Ip4 {
+		m4 := GetMain(m.v)
+		im = &m4.Main
+	} else if addr_family == ip.Ip6 {
+		m6 := ip6.GetMain(m.v)
+		im = &m6.Main
+	}
+	return
+}
+
+func (m *Main) NewAdjByFamily(ipn *net.IP, n uint) (ai ip.Adj, as []ip.Adjacency) {
+	im := m.IpMainByFamily(ipn)
+	ai, as = im.NewAdj(n)
+	return
 }

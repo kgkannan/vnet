@@ -57,16 +57,22 @@ type ipNeighbor struct {
 var ErrDelUnknownNeighbor = errors.New("delete unknown neighbor")
 
 //TBDIP6: handle ip6 esp. link-local cases here
-//option 1: specify both ip6.Main, ip4.Main in AddDelIpNeighbor
-//option 2: get m6 := ip6.GetMain(ipNeighborMain.v)
+/* to leverage single source fdb handlers in ip4/fib.go for ipv6 prefixes,
+ * get ip.Main based on the prefix instead of ip.Main passed as method argument
+ * NOTE: ip.Main and hence ip.Main.Family is specific to the corresponding top level
+ * Main (ip4.Main or ip6.Main) and hence can't be
+ */
 func (m *ipNeighborMain) AddDelIpNeighbor(im *ip.Main, n *IpNeighbor, isDel bool) (ai ip.Adj, err error) {
 	var rwSi vnet.Si
 	var isBridge bool
 	var ctag, stag uint16
 	var br *bridgeEntry
 
+	//get ip.Main based on prefix instead of im
+	addr_family := ip.GetFamilyByAddress(&n.Ip)
+	imf := m.IpMainByFamily(&n.Ip)
 	ai = ip.AdjNil
-	nf := &m.ipNeighborFamilies[im.Family]
+	nf := &m.ipNeighborFamilies[addr_family]
 
 	// if bridge, then rwSi is the member port to reach the DA
 	if n.Si.Kind(m.v) == vnet.SwBridgeInterface {
@@ -113,7 +119,7 @@ func (m *ipNeighborMain) AddDelIpNeighbor(im *ip.Main, n *IpNeighbor, isDel bool
 	)
 	prefix.IP = n.Ip
 	prefix.Mask = net.CIDRMask(32, 32)
-	if im.Family == ip.Ip6 {
+	if addr_family == ip.Ip6 {
 		prefix.Mask = net.CIDRMask(128, 128)
 	}
 	if ok {
@@ -132,7 +138,8 @@ func (m *ipNeighborMain) AddDelIpNeighbor(im *ip.Main, n *IpNeighbor, isDel bool
 				return
 			}
 
-			im.DelAdj(ai)
+			//get adj from ip.Main based on prefix instead of im
+			m.CallAdjAddDelByFamily(&n.Ip, ai, isDel)
 		} else {
 			dbgvnet.Adj.Logf("DEBUG delete neighbor %v but did not find an adj, got ai = %v\n", prefix.String(), ai.String())
 		}
@@ -141,7 +148,8 @@ func (m *ipNeighborMain) AddDelIpNeighbor(im *ip.Main, n *IpNeighbor, isDel bool
 	} else {
 		is_new_adj := len(as) == 0
 		if is_new_adj {
-			ai, as = im.NewAdj(1)
+			//get adj from ip.Main based on prefix instead of im
+			ai, as = m.NewAdjByFamily(&n.Ip, 1)
 		}
 		rw := &as[0].Rewrite
 
@@ -153,13 +161,15 @@ func (m *ipNeighborMain) AddDelIpNeighbor(im *ip.Main, n *IpNeighbor, isDel bool
 			return
 		}
 		rw.Stag = stag
-		h := m.v.SetRewriteNodeHwIf(rw, hw, im.RewriteNode)
+		//get ip.Main based on prefix instead of im
+		h := m.v.SetRewriteNodeHwIf(rw, hw, imf.RewriteNode)
 		rw.Si = rwSi
 
+		//get ip.Main based on prefix instead of im
 		if isBridge {
-			br.SetRewrite(m.v, rw, im.PacketType, n.Ethernet[:], ctag)
+			br.SetRewrite(m.v, rw, imf.PacketType, n.Ethernet[:], ctag)
 		} else {
-			h.SetRewrite(m.v, rw, im.PacketType, n.Ethernet[:])
+			h.SetRewrite(m.v, rw, imf.PacketType, n.Ethernet[:])
 		}
 		as[0].LookupNextIndex = ip.LookupNextRewrite
 
@@ -171,8 +181,9 @@ func (m *ipNeighborMain) AddDelIpNeighbor(im *ip.Main, n *IpNeighbor, isDel bool
 			prefix.String(),
 		)
 
+		//get adj from ip.Main based on prefix instead of im
 		if is_new_adj {
-			im.CallAdjAddHooks(ai)
+			m.CallAdjAddDelByFamily(&n.Ip, ai, isDel)
 		}
 		if _, err = im.AddDelRoute(&prefix, im.FibIndexForSi(rwSi), ai, isDel); err != nil {
 			return
@@ -224,5 +235,30 @@ func (m *ipNeighborMain) swIfAddDel(v *vnet.Vnet, si vnet.Si, isDel bool) (err e
 			}
 		}
 	}
+	return
+}
+
+func (nm *ipNeighborMain) CallAdjAddDelByFamily(ipn *net.IP, ai ip.Adj, isDel bool) {
+	addr_family := ip.GetFamilyByAddress(ipn)
+	im := nm.ipNeighborFamilies[addr_family].m
+	if !isDel {
+		im.CallAdjAddHooks(ai)
+	} else {
+		im.DelAdj(ai)
+	}
+}
+
+//get adj from ip.Main based on prefix instead of im
+func (nm *ipNeighborMain) NewAdjByFamily(ipn *net.IP, n uint) (ai ip.Adj, as []ip.Adjacency) {
+	addr_family := ip.GetFamilyByAddress(ipn)
+	im := nm.ipNeighborFamilies[addr_family].m
+	ai, as = im.NewAdj(n)
+	return
+}
+
+//get ip.Main based on prefix instead of im
+func (nm *ipNeighborMain) IpMainByFamily(ipn *net.IP) (im *ip.Main) {
+	addr_family := ip.GetFamilyByAddress(ipn)
+	im = nm.ipNeighborFamilies[addr_family].m
 	return
 }

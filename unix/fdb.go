@@ -1432,14 +1432,15 @@ func (m *FdbMain) ipFibRoute(c cli.Commander, w cli.Writer, in *cli.Input) (err 
 
 	//TODOIP6: stub code similar to ProcessFibEntry()
 	em := ethernet.GetMain(v)
-	//m4 := ip4.GetMain(v)
-	m6 := ip6.GetMain(v)
+	m4 := ip4.GetMain(v)
+	//TODOIP6: ignore ip6.Main, leverage only ip4.GetMain
+	//m6 := ip6.GetMain(v)
 	ip_pfx := GetIp6Prefix(prefix, plen)
 	//defer printStack()
 	defer recoverIpFibRoute()
 	if ip6_fib_ent.is_punt {
 		dbgvnet.Adj.Logf("ip6: netns %v intf addr %v si %v", nsName, ip_pfx, ip6_fib_ent.ip6_nhs[0].Si)
-		m6.AddDelInterfaceAddressRoute(ip_pfx, ip6_fib_ent.ip6_nhs[0].Si, ip.LOCAL, ip6_fib_ent.is_del)
+		m4.AddDelInterfaceAddressRoute(ip_pfx, ip6_fib_ent.ip6_nhs[0].Si, ip4.LOCAL, ip6_fib_ent.is_del)
 		return
 	}
 
@@ -1454,16 +1455,18 @@ func (m *FdbMain) ipFibRoute(c cli.Commander, w cli.Writer, in *cli.Input) (err 
 			copy(nbr.Ethernet[:], link_addr)
 		}
 		dbgvnet.Adj.Logf("ip6: netns %v neighbor ip %v si %v mac %v", nsName, nbr.Ip, nbr.Si, nbr.Ethernet)
-		//em.AddDelIpNeighbor(&m4.Main, &nbr, false)
-		em.AddDelIpNeighbor(&m6.Main, &nbr, ip6_fib_ent.is_del)
+		em.AddDelIpNeighbor(&m4.Main, &nbr, ip6_fib_ent.is_del)
+		//TODOIP6: ignore ip6.Main, leverage only ip4.GetMain
+		//em.AddDelIpNeighbor(&m6.Main, &nbr, ip6_fib_ent.is_del)
 		if is_via {
 			dbgvnet.Adj.Logf("dbggk: via route for prefix %v intf %s", prefix, intf)
-			//m4.AddDelRouteNextHops(ns.fibIndexForNamespace(), ip_pfx, ip6_fib_ent.ip6_nhs,
-			//		false, false)
+			m4.AddDelRouteNextHops(ns.fibIndexForNamespace(), ip_pfx, ip6_fib_ent.ip6_nhs,
+				false, false)
 			//TODOIP6: revisit this; move AddDelRouteNextHops as
 			//wrapper in ip6/fib.go
-			m6.AddDelRouteNextHops(ns.fibIndexForNamespace(), ip_pfx, ip6_fib_ent.ip6_nhs,
-				false, false)
+			//TODOIP6: ignore ip6.Main, leverage only ip4.GetMain
+			//m6.AddDelRouteNextHops(ns.fibIndexForNamespace(), ip_pfx, ip6_fib_ent.ip6_nhs,
+			//	false, false)
 		}
 	}
 

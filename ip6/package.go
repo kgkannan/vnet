@@ -23,7 +23,6 @@ func Init(v *vnet.Vnet) *ip.Main {
 		AddressStringer: ipAddressStringer,
 		RewriteNode:     &m.rewriteNode,
 		PacketType:      vnet.IP6,
-		AddDelRoute:     m.addDelRoute,
 	}
 	m.Main.PackageInit(v, cf)
 	return &m.Main
@@ -36,7 +35,6 @@ func ipAddressStringer(a *ip.Address) string { return IpAddress(a).String() }
 type Main struct {
 	vnet.Package
 	ip.Main
-	fibMain
 	nodeMain
 	ifAddrAddDelHooks IfAddrAddDelHookVec
 }
